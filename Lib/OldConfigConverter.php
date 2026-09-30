@@ -1,0 +1,939 @@
+<?php
+/*
+ * MikoPBX - free phone system for small business
+ * Copyright © 2017-2024 Alexey Portnov and Nikolay Beketov
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along with this program.
+ * If not, see <https://www.gnu.org/licenses/>.
+ */
+
+namespace Modules\ModuleBackup\Lib;
+
+use MikoPBX\Common\Models\{CustomFiles, Extensions, ExternalPhones, NetworkFilters, PbxSettings};
+
+use MikoPBX\Core\System\MikoPBXConfig;
+use MikoPBX\Core\System\Network;
+use MikoPBX\Core\System\Verify;
+use simplehtmldom\HtmlDocument;
+
+include_once __DIR__.'/../vendor/autoload.php';
+
+class OldConfigConverter
+{
+    private HtmlDocument $resHtml;
+    private array $data;
+    private array $tmp_data;
+
+    /**
+     * OldConfigConverter constructor.
+     *
+     * @param $filename
+     */
+    public function __construct($filename)
+    {
+        $xmlData = file_get_contents($filename);
+        $client = new HtmlDocument();
+        $this->resHtml = $client->load($xmlData);
+        if(count($this->resHtml->find('phone')) === 0){
+            $xmlData = $this->csvToXML($xmlData);
+            $client = new HtmlDocument();
+            $this->resHtml = $client->load($xmlData);
+        }
+        $this->data     = [
+            'm_Users'                     => [],
+            'm_Sip'                       => [],
+            'm_Extensions'                => [],
+            'm_ExternalPhones'            => [],
+            'm_ExtensionForwardingRights' => [],
+            'extensions'                  => [],
+            'providers_sip'               => [],
+            'providers_iax'               => [],
+            'asterisk-managers'           => [],
+            'net_filters'                 => [],
+            'smart_ivr'                   => [],
+            'saas_key'                    => '',
+            'call-queues'                 => [],
+            'ivr-menu'                    => [],
+        ];
+        $this->tmp_data = [];
+    }
+
+    private function csvToXML(string $doc):string
+    {
+        $resultSip = '<sip>'.PHP_EOL;
+        $resultExternal = '<external>'.PHP_EOL;
+        $rows   = explode(PHP_EOL, $doc);
+
+        $this->makeXmlFromCsvMain($rows, $resultSip, $resultExternal);
+        $this->makeXmlFromCsvFreePBX($rows, $resultSip);
+
+        $resultSip.= '</sip>'.PHP_EOL;
+        $resultExternal.= '</external>'.PHP_EOL;
+        return "$resultSip $resultExternal";
+    }
+
+    /**
+     * Преобразование csv в xml
+     * @param array  $rows
+     * @param string $resultSip
+     * @param string $resultExternal
+     * @return void
+     */
+    private function makeXmlFromCsvMain(array $rows, string &$resultSip, string &$resultExternal):void
+    {
+        $content = '';
+        $pjsipConf = CustomFiles::findFirst('filepath="/etc/asterisk/pjsip.conf"');
+        if($pjsipConf){
+            $content = base64_decode($pjsipConf->content).PHP_EOL;
+            if(strpos($content, '[custom_aor_template]') === false){
+                $content.=  "[custom_aor_template](!)".PHP_EOL.
+                    "type = aor".PHP_EOL.
+                    "qualify_frequency = 60".PHP_EOL.
+                    "qualify_timeout = 5".PHP_EOL.
+                    "max_contacts = 5".PHP_EOL.PHP_EOL;
+            }
+        }
+        foreach ($rows as $row){
+            $columns = explode(';', $row);
+            if(count($columns)<3){
+                continue;
+            }
+            if(!is_numeric($columns[0])){
+                continue;
+            }
+            $manualattributes = '';
+            $authUsername = $columns[6]??'';
+            if(!empty($authUsername)){
+                $manualattributes = base64_encode("[auth]".PHP_EOL.
+                                    "username = $authUsername".PHP_EOL.
+                                    "[endpoint]".PHP_EOL.
+                                    "aors={$columns[0]},$authUsername");
+
+                if(strpos($content, "[$authUsername](custom_aor_template)") === false) {
+                    $content.= "[$authUsername](custom_aor_template)".PHP_EOL.
+                        "[$authUsername] ".PHP_EOL.
+                        "type = identify".PHP_EOL.
+                        "endpoint = {$columns[0]}".PHP_EOL.
+                        "match_header=From: /.*<sip:$authUsername@.*/".PHP_EOL;
+                }
+            }
+            $uid = strtoupper('SIP-IMP-' . $columns[0]);
+            $name = empty($columns[1])?$columns[0]:$columns[1];
+            $resultSip.='    <phone>'.PHP_EOL;
+            $resultSip.='	    <extension>'.$columns[0].'</extension>'.PHP_EOL.
+                '	    <callerid>'.$name.'</callerid>'.PHP_EOL.
+                '	    <uniqid>'.$uid.'</uniqid>'.PHP_EOL.
+                '	    <manualattributes>'.$manualattributes.'</manualattributes>'.PHP_EOL.
+                '	    <secret>'.$columns[2].'</secret>'.PHP_EOL;
+
+            if(isset($columns[3])){
+                $resultExternal.= '    <phone>'.PHP_EOL;
+                $resultExternal.= '        <uniqid>'.$uid.'</uniqid>'.PHP_EOL;
+                $resultExternal.= '        <extension>'.$columns[3].'</extension>'.PHP_EOL;
+
+                $resultSip     .='        <forwarding_external>'.$uid.'</forwarding_external>'.PHP_EOL;
+
+                $ringLength = intval($columns[4]??0);
+                if($ringLength > 1){
+                    $resultSip.='        <ringlength>'.$ringLength.'</ringlength>'.PHP_EOL;
+                }
+                if( intval($columns[5]??0) === 1){
+                    $resultSip.='        <forwarding_on_busy_external>'.$uid.'</forwarding_on_busy_external>'.PHP_EOL;
+                    $resultSip.='        <forwarding_on_unavailable_external>'.$uid.'</forwarding_on_unavailable_external>'.PHP_EOL;
+                }
+                $resultExternal.= '    </phone>'.PHP_EOL;
+            }
+            $resultSip.='    </phone>'.PHP_EOL;
+        }
+
+        if($pjsipConf){
+
+            $pjsipConf->content = base64_encode($content);
+            $pjsipConf->mode = 'append';
+            $pjsipConf->save();
+        }
+    }
+
+    /**
+     * Преобразование csv в xml
+     * @param array  $rows
+     * @param string $resultSip
+     * @return void
+     */
+    private function makeXmlFromCsvFreePBX(array $rows, string &$resultSip):void
+    {
+        $indexes = [];
+        foreach ($rows as $index => $row){
+            $columns = explode(',', $row);
+            if($index === 0){
+                $indexes = array_flip($columns);
+                if( !isset($indexes['extension'],$indexes['secret'],$indexes['name']) ){
+                    return;
+                }
+                continue;
+            }
+
+            if(count($columns)<3){
+                continue;
+            }
+            if(!is_numeric($columns[0])){
+                continue;
+            }
+            $uid = strtoupper('SIP-PHONE-IMPORT-' . $columns[0]);
+            $resultSip.='    <phone>'.PHP_EOL;
+            $resultSip.='	    <extension>'.$columns[$indexes['extension']].'</extension>'.PHP_EOL.
+                '	    <callerid>'.str_replace('"','',$columns[$indexes['name']]).'</callerid>'.PHP_EOL.
+                '	    <uniqid>'.$uid.'</uniqid>'.PHP_EOL.
+                '	    <secret>'.$columns[$indexes['secret']].'</secret>'.PHP_EOL;
+
+            $resultSip.='    </phone>'.PHP_EOL;
+        }
+    }
+
+
+    /**
+     * Старт конвертации конфигурации.
+     *
+     * @return array
+     */
+    public function parse()
+    {
+        if ($this->resHtml) {
+            $this->parseSipPhones();
+            $this->parseExternalPhone();
+            $this->parseManager();
+            $this->parseSipProviders();
+            $this->parseIaxProviders();
+            $this->parseSmartIvr();
+            $this->parseSaasKey();
+            $this->parseCallFlow();
+        }
+
+        return $this->data;
+    }
+
+    /**
+     * Конвертация настроек sip.conf (пользовательские учетки).
+     */
+    private function parseSipPhones(): void
+    {
+        if (is_bool($this->resHtml)) {
+            return;
+        }
+        $sip_phone_nodes = $this->resHtml->find('sip phone');
+        if (is_bool($sip_phone_nodes)) {
+            return;
+        }
+        foreach ($sip_phone_nodes as $e) {
+            $this->initData($e->children);
+            $uid = $this->get('uniqid');
+            if ($uid === null) {
+                $uid = strtoupper('SIP-PHONE-' . md5(time()));
+            }
+
+            $extension = preg_replace('/\D/', '', (string)$this->get('extension'));
+            $this->data['m_ExtensionForwardingRights'][] = [
+                'extension'                  => $extension,
+                'ringlength'                 => $this->get('ringlength'),
+                'forwarding'                 => null,
+                'forwardingonbusy'           => null,
+                'forwardingonunavailable'    => null,
+                'id_forwarding'              => $this->get('forwarding_external'),
+                'id_forwardingonbusy'        => $this->get('forwarding_on_busy_external'),
+                'id_forwardingonunavailable' => $this->get('forwarding_on_unavailable_external'),
+            ];
+
+            $this->data['m_Users'][]      = [
+                'id'       => $extension,
+                'email'    => $this->get('emailcallrecordaddress'),
+                'username' => $this->get('callerid'),
+                'role'     => 'user',
+                'language' => $this->get('language'),
+            ];
+            $this->data['m_Sip'][]        = [
+                'disabled'    => false,
+                'extension'   => $extension,
+                'type'        => 'peer',
+                'host'        => null,
+                'port'        => null,
+                'username'    => null,
+                'secret'      => $this->get('secret'),
+                'fromuser'    => null,
+                'fromdomain'  => null,
+                'uniqid'      => $uid,
+                'enableRecording' => '1',
+                'dtmfmode'    => $this->get('dtmfmode'),
+
+            ];
+            $this->data['m_Extensions'][] = [
+                'number'                 => $extension,
+                'type'                   => 'SIP',
+                'callerid'               => $this->get('callerid'),
+                'userid'                 => $extension,
+                'is_general_user_number' => 1,
+            ];
+
+            $rules         = 'rule_SIP,local_network';
+            $networkfilter = $this->addNetFilter((string) $this->get('permitip'), (string) $this->get('permitnetmask'), $rules);
+
+            $secretVal = (string)$this->get('secret');
+            $secretPos = stripos($secretVal, '</secret>');
+            $secret = $secretPos !== false ? substr($secretVal, 0, $secretPos) : $secretVal;
+            $secret = (trim($secret) === '') ? $secretVal : $secret;
+
+            $language_code = $this->get('language');
+            if ($language_code !== 'ru-ru' && $language_code !== 'en-en') {
+                $language = 'en-en';
+            } else {
+                $language = $this->get('language');
+            }
+            /** @var \MikoPBX\Common\Models\Extensions $exten_db */
+            $exten_db = Extensions::findFirst(['conditions' => 'number=:number:', 'bind' => ['number' => $this->get('extension')]]);
+            $id       = ($exten_db === null) ? null : $exten_db->id;
+            $user_id  = ($exten_db === null) ? null : $exten_db->userid;
+
+            $exten_num                            = $this->get('extension');
+            $this->data['extensions'][$exten_num] = [
+                'id'                          => $id,
+                'user_id'                     => $user_id,
+                'fwd_ringlength'              => $this->get('ringlength'),
+                'user_username'               => $this->get('callerid'),
+                'number'                      => $exten_num,
+                'user_email'                  => $this->get('emailcallrecordaddress'),
+                'user_language'               => $language,
+                'sip_secret'                  => $secret,
+                'sip_uniqid'                  => $uid,
+                'sip_dtmfmode'                => $this->get('dtmfmode'),
+                'sip_type'                    => 'peer',
+                'is_general_user_number'      => 1,
+                'sip_disabled'                => 0,
+                //'user_role'                   => 'user',
+                'user_avatar'                 => '',
+                'sip_networkfilterid'         => 'none',
+                'file-select'                 => '',
+                'qualify'                     => 'on',
+                'qualifyfreq'                 => '60',
+                'codec_alaw'                  => 'on',
+                'codec_ulaw'                  => 'on',
+                'codec_g726'                  => 'false',
+                'codec_gsm'                   => 'false',
+                'codec_adpcm'                 => 'false',
+                'codec_g722'                  => 'false',
+                'codec_h263'                  => 'false',
+                'codec_h264'                  => 'false',
+                'sip_manualattributes'            => base64_decode($this->get('manualattributes')),
+                'mobile_number'               => '',
+                'mobile_dialstring'           => '',
+                'mobile_uniqid'               => null,
+                'fwd_forwarding'              => '',
+                'fwd_forwardingonbusy'        => '',
+                'fwd_forwardingonunavailable' => '',
+                'tmp_pbx_networkfilter'       => $networkfilter,
+            ];
+        }
+    }
+
+    /**
+     * Инициализация данных текущего узла.
+     *
+     * @param $children
+     */
+    private function initData($children): void
+    {
+        $this->tmp_data = [];
+        foreach ($children as $child) {
+            if ('read-permission' === $child->tag) {
+                $this->tmp_data[$child->tag][] = $child->plaintext;
+            } elseif ('write-permission' === $child->tag) {
+                $this->tmp_data[$child->tag][] = $child->plaintext;
+            } else {
+                $this->tmp_data[$child->tag] = $child->plaintext;
+            }
+        }
+    }
+
+    /**
+     * Получить значение свойства узла.
+     *
+     * @param $name
+     *
+     * @return mixed|null
+     */
+    private function get($name)
+    {
+        return $this->tmp_data[$name] ?? null;
+    }
+
+    /**
+     * Добавляем в массив новый сетевой фильтр.
+     *
+     * @param        $permitip
+     * @param        $permitnetmask
+     * @param string $rules
+     *
+     * @return string
+     */
+    private function addNetFilter($permitip, $permitnetmask, $rules = ''): string
+    {
+        $networkfilter = '';
+        if (Verify::isIpAddress($permitip) && Verify::isIpAddress($permitnetmask)) {
+            $net           = new Network();
+            $subnet        = $net->netMaskToCidr($permitnetmask);
+            $networkfilter = "{$permitip}/{$subnet}";
+
+            if (isset($this->data['net_filters'][$networkfilter])) {
+                $filter = &$this->data['net_filters'][$networkfilter];
+            } else {
+                $filter = [
+                    'id'             => null,
+                    'description'    => 'network from old config',
+                    'network'        => $permitip,
+                    'subnet'         => $subnet,
+                    'rule_SIP'       => 'false',
+                    'rule_WEB'       => 'false',
+                    'rule_AMI'       => 'false',
+                    'rule_CTI'       => 'false',
+                    'rule_ICMP'      => 'false',
+                    'local_network'  => 'false',
+                    'newer_block_ip' => 'false',
+                ];
+            }
+
+            $arr_rules = explode(',', $rules);
+            foreach ($arr_rules as $rule_name) {
+                $filter[$rule_name] = 'on';
+            }
+            if ($subnet == 32) {
+                $filter['local_network'] = 'false';
+            }
+            $this->data['net_filters'][$networkfilter] = $filter;
+        }
+
+        return $networkfilter;
+    }
+
+    /**
+     * Конвертация настроек внешних телефонов.
+     */
+    private function parseExternalPhone(): void
+    {
+        $externals = $this->resHtml->find('external phone');
+        foreach ($externals as $e) {
+            $this->initData($e->children);
+
+            $userid                      = null;
+            $user_num                    = null;
+            $fwd_forwarding              = null;
+            $fwd_forwardingonbusy        = null;
+            $fwd_forwardingonunavailable = null;
+            foreach ($this->data['m_ExtensionForwardingRights'] as &$forwarding) {
+                if ($forwarding['id_forwarding'] === $this->get('uniqid')) {
+                    $userid                   = $forwarding['id_forwarding'];
+                    $user_num                 = $forwarding['extension'];
+                    $forwarding['forwarding'] = $this->get('extension');
+                    $fwd_forwarding           = $this->get('extension');
+                    if ($forwarding['id_forwardingonbusy'] === $this->get('uniqid')) {
+                        $forwarding['forwardingonbusy'] = $this->get('extension');
+                        $fwd_forwardingonbusy           = $this->get('extension');
+                    }
+                    if ($forwarding['id_forwardingonunavailable'] === $this->get('uniqid')) {
+                        $forwarding['forwardingonunavailable'] = $this->get('extension');
+                        $fwd_forwardingonunavailable           = $this->get('extension');
+                    }
+                    break;
+                }
+            }
+            unset($forwarding);
+            if (!$userid) {
+                continue;
+            }
+            $mobileNumber = preg_replace('/\D/', '', (string)$this->get('extension'));
+            $exten_db      = ExternalPhones::findFirst(['conditions' => 'extension=:extension:', 'bind' => ['extension' => $mobileNumber]]);
+            $mobile_uniqid = ($exten_db === null) ? $this->get('uniqid') : $exten_db->uniqid;
+
+
+
+            $extension                                = &$this->data['extensions'][$user_num];
+            $extension['mobile_number']               = $mobileNumber;
+            $extension['mobile_dialstring']           = $extension['mobile_number'];
+            $extension['mobile_uniqid']               = $mobile_uniqid;
+            $extension['fwd_forwarding']              = $fwd_forwarding;
+            $extension['fwd_forwardingonbusy']        = $fwd_forwardingonbusy;
+            $extension['fwd_forwardingonunavailable'] = $fwd_forwardingonunavailable;
+
+            $this->data['m_Extensions'][] = [
+                'number'                 => $mobileNumber,
+                'type'                   => 'EXTERNAL',
+                'callerid'               => $this->get('callerid'),
+                'userid'                 => $userid,
+                'is_general_user_number' => 1,
+            ];
+
+            $this->data['m_ExternalPhones'][] = [
+                'extension'  => $mobileNumber,
+                'dialstring' => $mobileNumber,
+                'uniqid'     => $mobile_uniqid,
+                'disabled'   => 0,
+            ];
+        }
+    }
+
+    /**
+     * Конвертация настроек manager.conf.
+     */
+    private function parseManager(): void
+    {
+        $managers = $this->resHtml->find('services manager manager-user');
+        foreach ($managers as $e) {
+            $this->initData($e->children);
+            if ($this->get('username') !== null) {
+                $rules         = 'rule_AMI';
+                $networkfilter = $this->addNetFilter((string) $this->get('permitip'), (string) $this->get('permitnetmask'), $rules);
+
+                $manager = [
+                    'id'              => null,
+                    'username'        => $this->get('username'),
+                    'secret'          => $this->get('secret'),
+                    'networkfilterid' => 'none',
+                    'description'     => 'from old congig Askozia',
+                ];
+                $keys    = [
+                    'call',
+                    'cdr',
+                    'originate',
+                    'reporting',
+                    'agent',
+                    'config',
+                    'dialplan',
+                    'dtmf',
+                    'log',
+                    'system',
+                    'verbose',
+                    'user',
+                ];
+
+                foreach ($keys as $key) {
+                    $manager["{$key}_main"]  = 'false';
+                    $manager["{$key}_read"]  = 'false';
+                    $manager["{$key}_write"] = 'false';
+                }
+
+                $read_permission = $this->get('read-permission') ?? [];
+                foreach ($read_permission as $key) {
+                    $manager["{$key}_read"] = 'on';
+                }
+                $write_permission = $this->get('write-permission') ?? [];
+                foreach ($write_permission as $key) {
+                    $manager["{$key}_write"] = 'on';
+                }
+                foreach ($keys as $key) {
+                    if ($manager["{$key}_read"] === 'on' && $manager["{$key}_write"] === 'on') {
+                        $manager["{$key}_main"] = 'on';
+                    }
+                }
+
+                $this->data['asterisk-managers'][] = $manager;
+            }
+        }
+    }
+
+    /**
+     * Конвертация настроек sip.conf (учетки провайдеров).
+     */
+    private function parseSipProviders(): void
+    {
+        $providers = $this->resHtml->find('sip provider');
+        foreach ($providers as $e) {
+            $this->initData($e->children);
+            if ($this->get('uniqid') === null) {
+                continue;
+            }
+            $this->data['providers_sip'][] = [
+                'id'                         => null,
+                'uniqid'                     => $this->get('uniqid'),
+                'secret'                     => $this->get('secret'),
+                'dtmfmode'                   => $this->get('dtmfmode'),
+                'type'                       => 'friend',
+                'port'                       => $this->get('port'),
+                'username'                   => $this->get('username'),
+                'host'                       => $this->get('host'),
+                'description'                => $this->get('name'),
+                'providerType'               => 'SIP',
+                'receive_calls_without_auth' => 0,
+                'disabled'                   => 1,
+                'networkfilterid'            => 'none',
+                'file-select'                => '',
+                'qualify'                    => 'on',
+                'qualifyfreq'                => '60',
+                'codec_alaw'                 => 'on',
+                'codec_ulaw'                 => 'on',
+                'codec_g726'                 => 'false',
+                'codec_gsm'                  => 'false',
+                'codec_adpcm'                => 'false',
+                'codec_g722'                 => 'false',
+                'codec_h263'                 => 'false',
+                'codec_h264'                 => 'false',
+                'disablefromuser'            => ($this->get('disablefromuser') === 'yes') ? 1 : 0,
+                'fromdomain'                 => $this->get('fromdomain'),
+                'fromuser'                   => $this->get('fromuser'),
+                'manualattributes'           => base64_decode($this->get('manualattributes')),
+                'noregister'                 => ($this->get('noregister') === 'yes') ? 1 : 0,
+            ];
+        }
+    }
+
+    /**
+     * Конвертация настроек sip.conf (учетки провайдеров).
+     */
+    private function parseIaxProviders(): void
+    {
+        $provider = $this->resHtml->find('iax provider');
+        foreach ($provider as $e) {
+            $this->initData($e->children);
+            if ($this->get('uniqid') === null) {
+                continue;
+            }
+
+            $this->data['providers_iax'][] = [
+                'id'               => null,
+                'uniqid'           => $this->get('uniqid'),
+                'secret'           => $this->get('secret'),
+                'type'             => null,
+                'username'         => $this->get('username'),
+                'host'             => $this->get('host'),
+                'description'      => $this->get('name'),
+                'providerType'     => 'IAX',
+                'disabled'         => 1,
+                'networkfilterid'  => 'none',
+                'qualify'          => 'on',
+                'codec_alaw'       => 'on',
+                'codec_ulaw'       => 'on',
+                'codec_g726'       => 'false',
+                'codec_gsm'        => 'false',
+                'codec_adpcm'      => 'false',
+                'codec_g722'       => 'false',
+                'codec_h263'       => 'false',
+                'codec_h264'       => 'false',
+                'manualattributes' => base64_decode($this->get('manualattributes')),
+                'noregister'       => ($this->get('noregister') === 'yes') ? 'on' : 'false',
+            ];
+        }
+    }
+
+    /**
+     * Получаем настройки SMART IVR.
+     */
+    private function parseSmartIvr(): void
+    {
+        $ivrs = $this->resHtml->find('miko_1c smartivr');
+        foreach ($ivrs as $e) {
+            $this->initData($e->children);
+            $exten = '000063';
+            foreach ($this->data['extensions'] as $key => $value) {
+                $exten = $key;
+                break;
+            }
+
+            $this->data['smart_ivr'] = [
+                'server1chost'      => $this->get('server'),
+                'server1cport'      => $this->get('port'),
+                'database'          => $this->get('db_name'),
+                'login'             => $this->get('user_1c'),
+                'secret'            => $this->get('pass'),
+                'failoverextension' => "$exten",
+            ];
+
+            break;
+        }
+    }
+
+    /**
+     * Получаем ключ лицензии.
+     */
+    private function parseSaasKey(): void
+    {
+        foreach ($this->resHtml->find('saaskey') as $e) {
+            $this->data['saas_key'] = $e->text();
+        }
+    }
+
+    /**
+     * Разбор маршрутов вызовов.
+     */
+    private function parseCallFlow(): void
+    {
+        $callflows = $this->resHtml->find('cfe callflow');
+        foreach ($callflows as $e) {
+            $this->initData($e->children);
+            if ($this->get('data') === null) {
+                continue;
+            }
+            $data = json_decode(base64_decode($this->get('data')), true);
+            $this->parseQueues($data);
+            $this->parseIvr($data);
+        }
+    }
+
+    /**
+     * Конвертация очередей.
+     *
+     * @param $data
+     */
+    private function parseQueues($data): void
+    {
+        $queues      = [];
+        $tmp_queues  = [];
+        $tmp_members = [];
+        foreach ($data['containers'] as $key => $value) {
+            if ('Queue' === $value['title']) {
+                $tmp_queues[$key] = $value;
+            } elseif ('QueueMember' === $value['title']) {
+                $tmp_members[$key] = $value;
+            }
+        }
+
+        foreach ($data['wires'] as $value) {
+            $src = $value['src']['moduleId'];
+            $tgt = $value['tgt']['moduleId'];
+
+            if ( ! isset($tmp_queues[$src]) || ! isset($tmp_members[$tgt])) {
+                continue;
+            }
+            if ( ! isset($queues[$src]['description'])) {
+                $queues[$src]['members']                      = [];
+                $queues[$src]['name']                         = $this->get('name');
+                $queues[$src]['recive_calls_while_on_a_call'] = ($tmp_queues[$src]["dataContainer"]["checkbox3"] === "y") ? 'false' : 'on';
+                $queues[$src]['strategy']                     = $tmp_queues[$src]["dataContainer"]["list2"];
+                $queues[$src]['caller_hear']                  = "moh";
+                $queues[$src]['description']                  = "from old config Askozia";
+                $queues[$src]['announce_hold_time']           = ($tmp_queues[$src]["dataContainer"]["checkbox6"] === "y") ? 'on' : 'false';
+                $queues[$src]['announce_position']            = ($tmp_queues[$src]["dataContainer"]["checkbox7"] === "y") ? 'on' : 'false';
+
+                $queues[$src]['periodic_announce_frequency']      = ($tmp_queues[$src]["dataContainer"]["number5"] === "0") ? '30' : $tmp_queues[$src]["dataContainer"]["number5"];
+                $queues[$src]['periodic_announce_sound_id']       = '';
+                $queues[$src]['timeout_to_redirect_to_extension'] = '';
+                $queues[$src]['timeout_extension']                = '';
+                $queues[$src]['redirect_to_extension_if_empty']   = '';
+                $queues[$src]['id']                               = null;
+                $queues[$src]['seconds_for_wrapup']               = $tmp_queues[$src]["dataContainer"]["number3"];
+                $queues[$src]['seconds_to_ring_each_member']      = $tmp_queues[$src]["dataContainer"]["number4"];
+            }
+
+            $id_user = $tmp_members[$tgt]['dataContainer']['list1'];
+            foreach ($this->data['extensions'] as $exten) {
+                if ($exten['sip_uniqid'] === $id_user) {
+                    $queues[$src]['members'][] = [
+                        'number'   => $exten['number'],
+                        'priority' => count($queues[$src]['members']),
+                    ];
+                    break;
+                }
+            }
+
+            foreach ($this->data['m_ExternalPhones'] as $exten) {
+                if ($exten['uniqid'] === $id_user) {
+                    $queues[$src]['members'][] = [
+                        'number'   => $exten['extension'],
+                        'priority' => count($queues[$src]['members']),
+                    ];
+                    break;
+                }
+            }
+        }
+
+        foreach ($queues as $key => $q) {
+            $q['members'] = json_encode($q['members'], JSON_UNESCAPED_SLASHES);
+            if (count($queues) === 1) {
+                $q['extension'] = $this->get('number');
+            } else {
+                $q['extension'] = '100' . $key . '0' . $this->get('number');
+            }
+            $q['uniqid']                 = Extensions::TYPE_QUEUE."-" . md5($q['extension']);
+            $this->data['call-queues'][] = $q;
+        }
+    }
+
+    private function parseIvr($data): void
+    {
+        $tmp_ivrs    = [];
+        $tmp_modules = [];
+
+        /*
+         /admin-cabinet/ivr-menu/save
+         */
+        foreach ($data['containers'] as $key => $value) {
+            if ('Background' == $value['title']) {
+                $tmp_ivrs[$key] = $value;
+            } else {
+                $tmp_modules[$key] = $value;
+            }
+        }
+
+        $arr_digits = [
+            'Press1' => '1',
+            'Press2' => '2',
+            'Press3' => '3',
+            'Press4' => '4',
+            'Press5' => '5',
+            'Press6' => '6',
+            'Press7' => '7',
+            'Press8' => '8',
+            'Press9' => '9',
+        ];
+        foreach ($tmp_ivrs as $key => $ivr) {
+            $m_ivr = [
+                'id'                                 => null,
+                'name'                               => $this->get('name'), // TODO,
+                'extension'                          => '' . $this->get('number') . $key, // TODO,
+                'description'                        => 'IVR from OLD config ' . $this->get('number'), // TODO,
+                'actions'                            => [],
+                'timeout_extension'                  => '',
+                'uniqid'                             => 'IVR-' . md5($key . time()),
+                'allow_enter_any_internal_extension' => 'false',
+                'audio_message_id'                   => '0',
+            ];
+            // $key - это id модуля IVR.
+            foreach ($data['wires'] as $value) {
+                unset($digits);
+                unset($timeout_extension);
+                // Найдем связи модуля IVR.
+                if ($value['src']['moduleId'] != $key) {
+                    continue;
+                }
+                // $tgt - id модуля назначения.
+                $tgt = $value['tgt']['moduleId'];
+                if ( ! isset($tmp_modules[$tgt])) {
+                    continue;
+                }
+                $m = $tmp_modules[$tgt];
+                if (isset($arr_digits[$m['title']])) {
+                    $digits = $arr_digits[$m['title']];
+                } elseif ($m['title'] == 'ExtensionT') {
+                    $timeout_extension = 't';
+                } else {
+                    continue;
+                }
+                $exten = '';
+                $id    = $tgt;
+                $ch    = 0;
+                while ($ch < 20) {
+                    if ($exten != '') {
+                        break;
+                    }
+                    $ch++;
+                    foreach ($data['wires'] as $wires) {
+                        if ($exten != '') {
+                            break;
+                        }
+                        if ($wires['src']['moduleId'] != $id) {
+                            continue;
+                        }
+                        $tgt_m = $wires['tgt']['moduleId'];
+                        if ( ! isset($tmp_modules[$tgt_m])) {
+                            continue;
+                        }
+                        $res_m = $tmp_modules[$tgt_m];
+                        if ('Phone' == $res_m['title']) {
+                            $phone_id = $res_m['dataContainer']['list1'];
+                            foreach ($this->data['extensions'] as $extension_m) {
+                                if ($extension_m['sip_uniqid'] == $phone_id) {
+                                    $exten = $extension_m['number'];
+                                    break;
+                                }
+                            }
+                        } elseif ('DialNumber' == $res_m['title']) {
+                            foreach ($this->data['extensions'] as $extension_m) {
+                                if ($extension_m['number'] == $res_m['dataContainer']['number1']) {
+                                    $exten = $extension_m['number'];
+                                    break;
+                                }
+                            }
+                            foreach ($this->data['call-queues'] as $extension_m) {
+                                if ($extension_m['name'] == $res_m['dataContainer']['number1']) {
+                                    $exten = $extension_m['extension'];
+                                    break;
+                                }
+                            }
+                        } else {
+                            $id = $tgt_m;
+                        }
+                    }
+                }
+
+                if ( ! empty($digits) && ! empty($exten)) {
+                    $m_ivr['actions'][] = [
+                        'digits'    => $digits,
+                        'extension' => $exten,
+                    ];
+                } elseif ( ! empty($exten) && ! empty($timeout_extension)) {
+                    $m_ivr['timeout_extension'] = $exten;
+                }
+            }
+            $m_ivr['actions']         = json_encode($m_ivr['actions'], JSON_UNESCAPED_SLASHES);
+            $this->data['ivr-menu'][] = $m_ivr;
+        } // foreach ($tmp_ivrs as $key => $ivr)
+
+    }
+
+    /**
+     * Создает конфигурацию в новом формате.
+     */
+    public function makeConfig(): bool
+    {
+        $w_api = new WebAPIClient();
+        foreach ($this->data['net_filters'] as $key => $value) {
+            $filter = NetworkFilters::findFirst(['conditions' => 'permit=:permit:', 'bind' => ['permit' => $key]]);
+            if ($filter === null) {
+                $w_api->addNetFilter($value);
+            }
+        }
+
+        foreach ($this->data['extensions'] as $key => $value) {
+            if ( ! empty($value['tmp_pbx_networkfilter'])) {
+                $filter = NetworkFilters::findFirst(['conditions' => 'permit=:permit:', 'bind' => ['permit' => $value['tmp_pbx_networkfilter']]]);
+                if ($filter !== null) {
+                    $value['sip_networkfilterid'] = $filter->id;
+                }
+            }
+            $w_api->addExtension($value);
+        }
+        foreach ($this->data['asterisk-managers'] as $key => $value) {
+            $w_api->addManager($value);
+        }
+        foreach ($this->data['providers_sip'] as $key => $value) {
+            $w_api->addProviderSip($value);
+        }
+
+        foreach ($this->data['providers_iax'] as $key => $value) {
+            $w_api->addProviderIax($value);
+        }
+
+        if (count($this->data['smart_ivr']) > 0) {
+            $w_api->addSmartIvr($this->data['smart_ivr']);
+        }
+
+        if ($this->data['saas_key'] !== '') {
+            $config = new MikoPBXConfig();
+            $config->setGeneralSettings('PBXLicense', $this->data['saas_key']);
+        }
+
+        foreach ($this->data['call-queues'] as $key => $value) {
+            $w_api->addQueue($value);
+        }
+        foreach ($this->data['ivr-menu'] as $key => $value) {
+            $w_api->addIvrMenu($value);
+        }
+        return true;
+    }
+
+}
