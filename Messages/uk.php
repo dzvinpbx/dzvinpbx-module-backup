@@ -58,4 +58,7 @@ return [
     'bkp_ValidateHostEmpty' => 'Не вказана адреса сервера FTP',
     'bkp_Mode' => 'Протокол',
     'bkp_WebDavMode' => 'WebDAV',
+    'bkp_CheckConnection' => 'Перевірити з\'єднання',
+    'bkp_CheckConnectionSuccess' => 'З\'єднання встановлено',
+    'bkp_CheckConnectionFail' => 'Не вдалося встановити з\'єднання',
 ];
