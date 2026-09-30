@@ -1,6 +1,6 @@
 <?php
 /*
- * MikoPBX - free phone system for small business
+ * Dzvin PBX - free phone system for small business
  * Copyright © 2017-2024 Alexey Portnov and Nikolay Beketov
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,11 +19,10 @@
 
 namespace Modules\ModuleBackup\Lib;
 
-use MikoPBX\Common\Models\{CustomFiles, Extensions, ExternalPhones, NetworkFilters, PbxSettings};
+use DzvinPBX\Common\Models\{CustomFiles, Extensions, ExternalPhones, NetworkFilters, PbxSettings};
 
-use MikoPBX\Core\System\MikoPBXConfig;
-use MikoPBX\Core\System\Network;
-use MikoPBX\Core\System\Verify;
+use DzvinPBX\Core\System\Network;
+use DzvinPBX\Core\System\Verify;
 use simplehtmldom\HtmlDocument;
 
 include_once __DIR__.'/../vendor/autoload.php';
@@ -61,7 +60,6 @@ class OldConfigConverter
             'asterisk-managers'           => [],
             'net_filters'                 => [],
             'smart_ivr'                   => [],
-            'saas_key'                    => '',
             'call-queues'                 => [],
             'ivr-menu'                    => [],
         ];
@@ -215,7 +213,6 @@ class OldConfigConverter
             $this->parseSipProviders();
             $this->parseIaxProviders();
             $this->parseSmartIvr();
-            $this->parseSaasKey();
             $this->parseCallFlow();
         }
 
@@ -297,7 +294,7 @@ class OldConfigConverter
             } else {
                 $language = $this->get('language');
             }
-            /** @var \MikoPBX\Common\Models\Extensions $exten_db */
+            /** @var \DzvinPBX\Common\Models\Extensions $exten_db */
             $exten_db = Extensions::findFirst(['conditions' => 'number=:number:', 'bind' => ['number' => $this->get('extension')]]);
             $id       = ($exten_db === null) ? null : $exten_db->id;
             $user_id  = ($exten_db === null) ? null : $exten_db->userid;
@@ -635,7 +632,7 @@ class OldConfigConverter
      */
     private function parseSmartIvr(): void
     {
-        $ivrs = $this->resHtml->find('miko_1c smartivr');
+        $ivrs = $this->resHtml->find('dzvin_1c smartivr');
         foreach ($ivrs as $e) {
             $this->initData($e->children);
             $exten = '000063';
@@ -657,15 +654,6 @@ class OldConfigConverter
         }
     }
 
-    /**
-     * Получаем ключ лицензии.
-     */
-    private function parseSaasKey(): void
-    {
-        foreach ($this->resHtml->find('saaskey') as $e) {
-            $this->data['saas_key'] = $e->text();
-        }
-    }
 
     /**
      * Разбор маршрутов вызовов.
@@ -920,11 +908,6 @@ class OldConfigConverter
 
         if (count($this->data['smart_ivr']) > 0) {
             $w_api->addSmartIvr($this->data['smart_ivr']);
-        }
-
-        if ($this->data['saas_key'] !== '') {
-            $config = new MikoPBXConfig();
-            $config->setGeneralSettings('PBXLicense', $this->data['saas_key']);
         }
 
         foreach ($this->data['call-queues'] as $key => $value) {

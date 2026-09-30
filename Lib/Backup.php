@@ -1,6 +1,6 @@
 <?php
 /*
- * MikoPBX - free phone system for small business
+ * Dzvin PBX - free phone system for small business
  * Copyright © 2017-2024 Alexey Portnov and Nikolay Beketov
  *
  * This program is free software: you can redistribute it and/or modify
@@ -20,9 +20,9 @@
 namespace Modules\ModuleBackup\Lib;
 
 use Exception;
-use MikoPBX\PBXCoreREST\Lib\PBXApiResult;
-use MikoPBX\Core\System\{Directories, Processes, Storage, System, Util};
-use MikoPBX\Modules\PbxExtensionBase;
+use DzvinPBX\PBXCoreREST\Lib\PBXApiResult;
+use DzvinPBX\Core\System\{Directories, Processes, Storage, System, Util};
+use DzvinPBX\Modules\PbxExtensionBase;
 use Modules\ModuleBackup\Models\BackupRules;
 
 class Backup extends PbxExtensionBase
@@ -49,7 +49,7 @@ class Backup extends PbxExtensionBase
     private bool $remote = false;
     private array $systemDbFiles = [];
 
-    public const CONF_DB_NAME = 'mikopbx.db';
+    public const CONF_DB_NAME = 'dzvinpbx.db';
     public const DB_FILES = [
         self::CONF_DB_NAME,
         'cdr.db'
@@ -205,7 +205,7 @@ class Backup extends PbxExtensionBase
             return $res;
         }
         $backupDir         = self::getBackupDir();
-        $di = MikoPBXVersion::getDefaultDi();
+        $di = DzvinPBXVersion::getDefaultDi();
         if($di === null){
             $res->messages[] = "Can not create DI.";
             return $res;
@@ -432,8 +432,8 @@ class Backup extends PbxExtensionBase
      */
     public static function getBackupDir(): string
     {
-        $di = MikoPBXVersion::getDefaultDi();
-        return $di->getShared('config')->path('core.mediaMountPoint').'/mikopbx/backup';
+        $di = DzvinPBXVersion::getDefaultDi();
+        return $di->getShared('config')->path('core.mediaMountPoint').'/dzvinpbx/backup';
     }
 
     /**
@@ -1050,11 +1050,11 @@ class Backup extends PbxExtensionBase
 
         // Create the local directory if it doesn't exist
         Util::mwMkdir($local_dir);
-        $di = MikoPBXVersion::getDefaultDi();
+        $di = DzvinPBXVersion::getDefaultDi();
 
         // Кеш davfs2 размещаем на дисковом хранилище, не в tmpfs (RAM),
         // иначе при бекапе больших файлов RAM переполняется.
-        $diskTmpBase = $di->getShared('config')->path('core.mediaMountPoint') . '/mikopbx/tmp';
+        $diskTmpBase = $di->getShared('config')->path('core.mediaMountPoint') . '/dzvinpbx/tmp';
         Util::mwMkdir($diskTmpBase);
         $tmpDir = "$diskTmpBase/webdav-cache";
         Util::mwMkdir($tmpDir, true);
@@ -1092,11 +1092,11 @@ class Backup extends PbxExtensionBase
      */
     public static function cleanupWebDavCache(): void
     {
-        $di = MikoPBXVersion::getDefaultDi();
+        $di = DzvinPBXVersion::getDefaultDi();
         if ($di === null) {
             return;
         }
-        $diskTmpBase = $di->getShared('config')->path('core.mediaMountPoint') . '/mikopbx/tmp';
+        $diskTmpBase = $di->getShared('config')->path('core.mediaMountPoint') . '/dzvinpbx/tmp';
         $rmPath = Util::which('rm');
         foreach (['webdav-cache', 'webdav-backup-cache'] as $dir) {
             $path = "$diskTmpBase/$dir";
@@ -1139,7 +1139,7 @@ class Backup extends PbxExtensionBase
 
         $extension    = Util::getExtensionOfFile($filename);
         $uid          = Util::generateRandomString(36);
-        $di = MikoPBXVersion::getDefaultDi();
+        $di = DzvinPBXVersion::getDefaultDi();
         $downloadLink = $di->getShared('config')->path('www.downloadCacheDir');
 
         $result_dir = "{$downloadLink}/{$uid}";
@@ -1995,7 +1995,7 @@ class Backup extends PbxExtensionBase
         $res->processor = __METHOD__;
 
         $arr_size                       = [];
-        $di = MikoPBXVersion::getDefaultDi();
+        $di = DzvinPBXVersion::getDefaultDi();
         $dirsConfig                     = $di->getShared('config');
         $dirs                           = [
             'backup'           => self::getBackupDir(),
@@ -2136,7 +2136,7 @@ class Backup extends PbxExtensionBase
 
         $result_file     = $filename;
         $tmp_path        = '/var/asterisk/';
-        $mem_monitor_dir = $this->dirs_mem['astspooldir'] . '/mikopbx/voicemailarchive/monitor';
+        $mem_monitor_dir = $this->dirs_mem['astspooldir'] . '/dzvinpbx/voicemailarchive/monitor';
         $monitor_dir     = Storage::getMonitorDir();
         if (strpos($filename, $tmp_path) === 0) {
             $var_search  = [
@@ -2344,8 +2344,8 @@ class Backup extends PbxExtensionBase
                 $cntr->parse();
                 $cntr->makeConfig();
                 file_put_contents('/tmp/ejectcd', '');
-                $mikopbx_rebootPath = Util::which('mikopbx_reboot');
-                Processes::mwExecBg($mikopbx_rebootPath, '/dev/null', 3);
+                $dzvinpbx_rebootPath = Util::which('dzvinpbx_reboot');
+                Processes::mwExecBg($dzvinpbx_rebootPath, '/dev/null', 3);
             } catch (Exception $e) {
                 $res->success = false;
                 $res->messages[] = $e->getMessage();

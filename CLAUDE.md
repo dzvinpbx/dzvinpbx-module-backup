@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ModuleBackup — модуль расширения для MikoPBX (IP-АТС на базе Asterisk). Обеспечивает резервное копирование и восстановление конфигурации, CDR, записей разговоров и звуковых файлов. Поддерживает хранение на локальном диске, FTP, SFTP и WebDAV.
+ModuleBackup — модуль расширения для DzvinPBX (IP-АТС на базе Asterisk). Обеспечивает резервное копирование и восстановление конфигурации, CDR, записей разговоров и звуковых файлов. Поддерживает хранение на локальном диске, FTP, SFTP и WebDAV.
 
 **Стек:** PHP 7.4+/8.x, Phalcon MVC framework, SQLite, Asterisk.
 
@@ -17,7 +17,7 @@ composer install          # установка зависимостей
 php -l <file.php>
 ```
 
-Тестов в репозитории нет. Модуль работает только в среде MikoPBX — локально не запускается.
+Тестов в репозитории нет. Модуль работает только в среде DzvinPBX — локально не запускается.
 
 ## Architecture
 
@@ -27,7 +27,7 @@ Namespace: `Modules\ModuleBackup\` (PSR-4, корень = корень репо�
 
 | Слой | Расположение | Назначение |
 |------|-------------|------------|
-| Конфигурация модуля | `Lib/BackupConf.php` | Интеграция с ядром MikoPBX: REST-маршруты, cron, callback'и |
+| Конфигурация модуля | `Lib/BackupConf.php` | Интеграция с ядром DzvinPBX: REST-маршруты, cron, callback'и |
 | Бизнес-логика | `Lib/Backup.php` | Создание/восстановление/удаление бекапов, FTP/SFTP/WebDAV |
 | Воркеры | `Lib/WorkerBackup.php`, `Lib/WorkerRecover.php` | CLI-процессы (`WorkerBase`), запуск через `nohup php -f` |
 | REST API | `Lib/RestApi/Controllers/` | GET/POST контроллеры, проксируют в backend |
@@ -51,9 +51,9 @@ REST API / Cron → BackupConf::moduleRestAPICallback → Backup::start/startRec
 
 ### Вспомогательные классы
 
-- **`Lib/MikoPBXVersion.php`** — совместимость Phalcon 4/5 (разные версии MikoPBX). Используется для получения DI, Validation, Text, Logger.
+- **`Lib/DzvinPBXVersion.php`** — совместимость Phalcon 4/5 (разные версии DzvinPBX). Используется для получения DI, Validation, Text, Logger.
 - **`Lib/WebAPIClient.php`** — HTTP-клиент (GuzzleHttp + cURL) для вызовов к PBXCore REST API при конвертации старых конфигов.
-- **`Lib/OldConfigConverter.php`** — парсинг и конвертация конфигов Askozia (XML/CSV) в формат MikoPBX.
+- **`Lib/OldConfigConverter.php`** — парсинг и конвертация конфигов Askozia (XML/CSV) в формат DzvinPBX.
 
 ## REST API
 
@@ -67,8 +67,7 @@ POST: `start`, `stop`, `upload`, `recover`
 Исходники в `public/assets/js/src/`. После изменения нужно собрать в `public/assets/js/`.
 
 Build через Babel (PHPStorm File Watcher или вручную):
-- Документация: https://docs.mikopbx.com/mikopbx-development/prepare-ide-tools/mac#phpstorm-setup-babel
-- Babel path: `/Users/apor/Developement/MikoPBX/MikoPBXUtils/node_modules/.bin/babel`
+- Babel: `npx babel` (пресет за налаштуваннями upstream)
 
 **Редактировать только файлы в `src/`**. Файлы в `public/assets/js/*.js` — сгенерированные.
 
@@ -76,7 +75,7 @@ Build через Babel (PHPStorm File Watcher или вручную):
 
 Код должен работать на PHP 7.4 и PHP 8.x. Ключевые правила:
 
-- `MikoPBXVersion::isPhalcon5Version()` — определять через `class_exists('\Phalcon\Di\Di')`, а не через `version_compare` с версией PBX из БД.
+- `DzvinPBXVersion::isPhalcon5Version()` — определять через `class_exists('\Phalcon\Di\Di')`, а не через `version_compare` с версией PBX из БД.
 - Не передавать `null` в строковые функции (`strpos`, `trim`, `explode` и т.д.) — в PHP 8.1 это Deprecation. Приводить к `(string)` или использовать `??`.
 - Не сравнивать массивы с числами через `<`/`>` — в PHP 8.0 это TypeError. Использовать `count()`.
 - Для приведения к int использовать `intval()` вместо `1 * $value` — неявное float→int даёт Deprecation в PHP 8.1.
@@ -88,7 +87,6 @@ Build через Babel (PHPStorm File Watcher или вручную):
 ## Conventions
 
 - Для приведения к int предпочитать `intval()` над `(int)` кастом.
-- Соседние модули в `/Volumes/DevDisk/apor/Developement/MikoPBX/Extensions/` содержат CLAUDE.md с полезными паттернами (PHP Compatibility, JavaScript Build, архитектура MikoPBX-модулей).
 - `module.json` содержит `moduleUniqueID: "ModuleBackup"` — используется повсеместно для путей, маршрутов и кеша.
 - Поле `what_backup` в модели — JSON с ключами `backup-config`, `backup-cdr`, `backup-records`, `backup-sound-files`.
 - Комментарии в коде на русском языке.

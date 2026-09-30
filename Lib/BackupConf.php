@@ -1,6 +1,6 @@
 <?php
 /*
- * MikoPBX - free phone system for small business
+ * Dzvin PBX - free phone system for small business
  * Copyright © 2017-2024 Alexey Portnov and Nikolay Beketov
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,10 +19,10 @@
 
 namespace Modules\ModuleBackup\Lib;
 
-use MikoPBX\Core\System\System;
-use MikoPBX\Modules\Config\ConfigClass;
-use MikoPBX\Core\System\Util;
-use MikoPBX\PBXCoreREST\Lib\PBXApiResult;
+use DzvinPBX\Core\System\System;
+use DzvinPBX\Modules\Config\ConfigClass;
+use DzvinPBX\Core\System\Util;
+use DzvinPBX\PBXCoreREST\Lib\PBXApiResult;
 use Modules\ModuleBackup\Lib\RestApi\Controllers\GetController;
 use Modules\ModuleBackup\Lib\RestApi\Controllers\PostController;
 use Modules\ModuleBackup\Models\BackupRules;
@@ -112,7 +112,7 @@ class BackupConf extends ConfigClass
     }
 
     /**
-     * Обработчик события изменения данных в базе настроек mikopbx.db.
+     * Обработчик события изменения данных в базе настроек dzvinpbx.db.
      *
      * @param mixed $data
      */

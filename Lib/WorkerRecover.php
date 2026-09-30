@@ -1,6 +1,6 @@
 <?php
 /*
- * MikoPBX - free phone system for small business
+ * Dzvin PBX - free phone system for small business
  * Copyright © 2017-2024 Alexey Portnov and Nikolay Beketov
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,8 +19,8 @@
 
 namespace Modules\ModuleBackup\Lib;
 
-use MikoPBX\Common\Handlers\CriticalErrorsHandler;
-use MikoPBX\Core\Workers\WorkerBase;
+use DzvinPBX\Common\Handlers\CriticalErrorsHandler;
+use DzvinPBX\Core\Workers\WorkerBase;
 
 require_once 'Globals.php';
 

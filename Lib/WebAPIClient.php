@@ -1,6 +1,6 @@
 <?php
 /*
- * MikoPBX - free phone system for small business
+ * Dzvin PBX - free phone system for small business
  * Copyright © 2017-2024 Alexey Portnov and Nikolay Beketov
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,7 +19,7 @@
 
 namespace Modules\ModuleBackup\Lib;
 
-use MikoPBX\Core\System\MikoPBXConfig;
+use DzvinPBX\Core\System\DzvinPBXConfig;
 use Exception;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
@@ -39,7 +39,7 @@ class WebAPIClient
      */
     public function login():bool
     {
-        $config       = new MikoPBXConfig();
+        $config       = new DzvinPBXConfig();
         $res_login    = $config->getGeneralSettings("WebAdminLogin");
         $res_password = $config->getGeneralSettings("WebAdminPassword");
         $WEBPort      = $config->getGeneralSettings("WEBPort");

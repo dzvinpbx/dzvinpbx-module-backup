@@ -1,5 +1,5 @@
 {
-    "name": "mikopbx/modulebackup",
+    "name": "dzvinpbx/modulebackup",
     "description": "ModuleBackup",
     "require": {
         "php": "7.4",
@@ -15,7 +15,7 @@
         "pbx",
         "asterisk",
         "freepbx",
-        "mikopbx",
+        "dzvinpbx",
         "sip",
         "voip",
         "phalcon",
@@ -25,33 +25,23 @@
         "calltracking"
     ],
     "license": "GPL-3.0-or-later",
-    "homepage": "https://github.com/mikopbx/ModuleBackup",
+    "homepage": "https://github.com/dzvinpbx/dzvinpbx-module-backup",
     "support": {
-        "email": "help@mikopbx.com",
-        "wiki": "https://wiki.mikopbx.com",
-        "issues": "https://github.com/mikopbx/Core/issues",
-        "source": "https://github.com/mikopbx/Core",
-        "forum": "https://qa.mikopbx.ru",
-        "chat": "https://t.me/mikopbx_dev"
+        "issues": "https://github.com/dzvinpbx/dzvinpbx-module-backup/issues",
+        "source": "https://github.com/dzvinpbx/dzvinpbx-module-backup"
     },
     "authors": [
         {
             "name": "Alexey Portnov",
             "email": "apor@miko.ru",
             "homepage": "https://www.facebook.com/PortnovAlexey",
-            "role": "Developer"
+            "role": "Developer (upstream MikoPBX ModuleBackup)"
         },
         {
             "name": "Nikolay Beketov",
             "email": "nbek@miko.ru",
             "homepage": "https://www.linkedin.com/in/nikolay-beketov",
-            "role": "Developer"
-        }
-    ],
-    "funding": [
-        {
-            "type": "patreon",
-            "url": "https://www.patreon.com/mikopbx"
+            "role": "Developer (upstream MikoPBX ModuleBackup)"
         }
     ],
     "config": {

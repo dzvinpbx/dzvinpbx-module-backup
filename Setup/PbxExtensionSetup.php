@@ -1,6 +1,6 @@
 <?php
 /*
- * MikoPBX - free phone system for small business
+ * Dzvin PBX - free phone system for small business
  * Copyright © 2017-2024 Alexey Portnov and Nikolay Beketov
  *
  * This program is free software: you can redistribute it and/or modify
@@ -19,9 +19,9 @@
 
 namespace Modules\ModuleBackup\Setup;
 
-use MikoPBX\Common\Models\PbxSettings;
-use MikoPBX\Modules\Setup\PbxExtensionSetupBase;
-use Modules\ModuleBackup\Lib\MikoPBXVersion;
+use DzvinPBX\Common\Models\PbxSettings;
+use DzvinPBX\Modules\Setup\PbxExtensionSetupBase;
+use Modules\ModuleBackup\Lib\DzvinPBXVersion;
 
 class PbxExtensionSetup extends PbxExtensionSetupBase
 {
@@ -60,7 +60,7 @@ class PbxExtensionSetup extends PbxExtensionSetupBase
     public function addToSidebar(): bool
     {
         $menuSettingsKey           = "AdditionalMenuItem{$this->moduleUniqueID}";
-        $textClass = MikoPBXVersion::getTextClass();
+        $textClass = DzvinPBXVersion::getTextClass();
         $unCamelizedControllerName = $textClass::uncamelize($this->moduleUniqueID, '-');
         $menuSettings              = PbxSettings::findFirstByKey($menuSettingsKey);
         if ($menuSettings === null) {

@@ -1,6 +1,6 @@
 <?php return array(
     'root' => array(
-        'name' => 'mikopbx/modulebackup',
+        'name' => 'dzvinpbx/modulebackup',
         'pretty_version' => 'dev-develop',
         'version' => 'dev-develop',
         'reference' => '17f7e013e17cd607006291e5c49585ff47f981aa',
@@ -10,7 +10,7 @@
         'dev' => true,
     ),
     'versions' => array(
-        'mikopbx/modulebackup' => array(
+        'dzvinpbx/modulebackup' => array(
             'pretty_version' => 'dev-develop',
             'version' => 'dev-develop',
             'reference' => '17f7e013e17cd607006291e5c49585ff47f981aa',
